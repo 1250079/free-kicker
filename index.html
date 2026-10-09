@@ -1,0 +1,183 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>フリーキックチャレンジ</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #102b24; color: white;
+  font-family: system-ui, sans-serif; text-align: center;
+}
+h1 { font-size: 25px; margin: 14px 0 4px; }
+p { margin: 6px 12px 12px; }
+main { max-width: 850px; margin: auto; padding: 8px; }
+canvas {
+  display: block; width: 100%; height: auto;
+  border: 3px solid white; border-radius: 12px;
+  background: #69b9e8; touch-action: manipulation;
+}
+button {
+  background: #ffd43b; border: 0; border-radius: 10px;
+  padding: 12px 24px; margin: 10px; font-size: 17px;
+  font-weight: bold; cursor: pointer;
+}
+#message { min-height: 28px; font-weight: bold; }
+</style>
+</head>
+<body>
+<main>
+<h1>⚽ フリーキックチャレンジ</h1>
+<p>ゴールをタップして狙いを決めよう！</p>
+<canvas id="game" width="800" height="560"></canvas>
+<div id="message">ゴールの狙いたい場所をクリック！</div>
+<button id="shoot">シュート！</button>
+<p>ゴールを決めて得点を増やそう！</p>
+</main>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const message = document.getElementById("message");
+const shootButton = document.getElementById("shoot");
+
+let score = 0, attempts = 0;
+let target = {x: 400, y: 175};
+let ball = {x: 400, y: 470, r: 16};
+let keeper = {x: 400, y: 205};
+let flying = false, progress = 0, result = "";
+let start = {x: 400, y: 470};
+
+function polygon(points, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  points.forEach((p, i) => i ? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1]));
+  ctx.closePath(); ctx.fill();
+}
+function line(x1,y1,x2,y2,color,width=2) {
+  ctx.strokeStyle=color; ctx.lineWidth=width;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+}
+function draw() {
+  ctx.clearRect(0,0,800,560);
+  // Sky and crowd
+  ctx.fillStyle="#73c5f0"; ctx.fillRect(0,0,800,300);
+  ctx.fillStyle="#344b64"; ctx.fillRect(0,170,800,85);
+  for(let i=0;i<180;i++){
+    ctx.fillStyle=["#f4d35e","#ee6c4d","#f7f7ff","#62d6a8"][i%4];
+    ctx.fillRect((i*47)%800,178+(i*23)%65,5,5);
+  }
+  // Perspective pitch
+  polygon([[0,560],[800,560],[610,250],[190,250]],"#218b48");
+  for(let i=0;i<6;i++){
+    const y=270+i*i*8;
+    line(190-i*15,y,610+i*15,y,"#55b86a",2);
+  }
+  // Penalty area
+  line(260,250,220,345,"#e9f7e9",3);
+  line(540,250,580,345,"#e9f7e9",3);
+  line(220,345,580,345,"#e9f7e9",3);
+  // Goal net
+  polygon([[240,95],[560,95],[540,205],[260,205]],"#d9f0fa");
+  for(let x=250;x<=550;x+=20) line(x,98,x+(260-x)*.05,202,"#a4c5d5",1);
+  for(let y=115;y<205;y+=18) line(244,y,556,y,"#a4c5d5",1);
+  // Goal frame
+  line(235,92,565,92,"white",9);
+  line(235,92,258,207,"white",8);
+  line(565,92,542,207,"white",8);
+  line(258,207,542,207,"white",6);
+  // Keeper, moving to target when shot starts
+  const kx = flying ? keeper.x + (target.x-keeper.x)*Math.min(progress*1.3,1) : keeper.x;
+  ctx.fillStyle="#182b3a";
+  ctx.beginPath(); ctx.ellipse(kx,218,30,7,0,0,Math.PI*2); ctx.fill();
+  // arms
+  line(kx-10,185,kx-38,195,"#ffcf99",10);
+  line(kx+10,185,kx+38,195,"#ffcf99",10);
+  // body and head
+  ctx.fillStyle="#ffb703"; ctx.fillRect(kx-19,177,38,39);
+  ctx.fillStyle="#e7b88a"; ctx.beginPath(); ctx.arc(kx,165,14,0,Math.PI*2); ctx.fill();
+  line(kx-10,214,kx-19,239,"#172b4d",10);
+  line(kx+10,214,kx+19,239,"#172b4d",10);
+  // Aim line before shot
+  if(!flying) {
+    line(ball.x,ball.y,target.x,target.y,"#fff176",3);
+    ctx.fillStyle="#fff176";
+    ctx.beginPath(); ctx.arc(target.x,target.y,8,0,Math.PI*2); ctx.fill();
+  }
+  // Ball shadow and ball
+  const scale = flying ? 1-progress*.45 : 1;
+  const bx = ball.x, by = ball.y;
+  ctx.fillStyle="rgba(0,0,0,.25)";
+  ctx.beginPath(); ctx.ellipse(bx,by+ball.r,ball.r*1.3,ball.r*.45,0,0,Math.PI*2); ctx.fill();
+  ctx.save(); ctx.translate(bx,by); ctx.scale(scale,scale);
+  ctx.fillStyle="white"; ctx.beginPath(); ctx.arc(0,0,ball.r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle="#263238"; ctx.lineWidth=2; ctx.stroke();
+  polygon([[-5,-5],[1,-9],[7,-3],[4,4],[-3,3]],"#263238");
+  ctx.restore();
+  // Score board
+  ctx.fillStyle="#102b24"; ctx.fillRect(18,18,185,60);
+  ctx.fillStyle="white"; ctx.font="bold 21px sans-serif";
+  ctx.fillText("GOAL: "+score,30,44);
+  ctx.font="16px sans-serif"; ctx.fillText("SHOTS: "+attempts,30,66);
+}
+function resetBall() {
+  ball={x:400,y:470,r:16};
+  start={x:400,y:470};
+  flying=false; progress=0;
+  keeper.x=400; keeper.y=205;
+  target={x:400,y:175};
+  draw();
+}
+function aim(event) {
+  if(flying) return;
+  const rect=canvas.getBoundingClientRect();
+  const x=(event.clientX-rect.left)*800/rect.width;
+  const y=(event.clientY-rect.top)*560/rect.height;
+  if(y<220 && x>235 && x<565) {
+    target={x,y}; message.textContent="狙いを決めたよ！ シュートしよう！";
+    draw();
+  }
+}
+canvas.addEventListener("pointerdown",aim);
+function shoot() {
+  if(flying) return;
+  attempts++;
+  flying=true; progress=0;
+  message.textContent="シュート！！";
+  const shotTarget={...target};
+  const startTime=performance.now();
+  function animate(now) {
+    if(!flying) return;
+    progress=Math.min((now-startTime)/650,1);
+    ball.x=start.x+(shotTarget.x-start.x)*progress;
+    ball.y=start.y+(shotTarget.y-start.y)*progress;
+    ball.r=16-progress*8;
+    draw();
+    if(progress<1) requestAnimationFrame(animate);
+    else {
+      const keeperNear=Math.abs(shotTarget.x-keeper.x)<55;
+      const onTarget=shotTarget.x>240 && shotTarget.x<560 &&
+                     shotTarget.y>95 && shotTarget.y<205;
+      if(onTarget && !keeperNear) {
+        score++; result="GOAL!!"; message.textContent="⚽ ゴール！！";
+      } else if(onTarget) {
+        result="SAVE!"; message.textContent="キーパーに止められた！";
+      } else {
+        result="MISS"; message.textContent="枠の外！ もう一度挑戦しよう。";
+      }
+      flying=false;
+      draw();
+      ctx.fillStyle="rgba(0,0,0,.72)"; ctx.fillRect(245,260,310,65);
+      ctx.fillStyle="#fff"; ctx.font="bold 34px sans-serif";
+      ctx.textAlign="center"; ctx.fillText(result,400,303); ctx.textAlign="start";
+      setTimeout(resetBall,1100);
+    }
+  }
+  requestAnimationFrame(animate);
+}
+shootButton.addEventListener("click",shoot);
+draw();
+</script>
+</body>
+</html>
